@@ -6,6 +6,28 @@ Nació como un proyecto real para un salón de barrio, con una necesidad concret
 
 **Stack:** Kotlin · Jetpack Compose (Material 3) · MVVM · Coroutines/Flow · Hilt · Room · KSP · JUnit
 
+## Capturas
+
+Versión demo en una tablet, con datos de ejemplo.
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/01-entrada.png" width="260" alt="Pantalla de entrada"><br><sub>Entrada: cada persona toca su nombre y pone su PIN</sub></td>
+    <td align="center"><img src="docs/screenshots/02-fichar.png" width="260" alt="Pantalla de fichar"><br><sub>Fichar, con el turno de hoy y el aviso de una corrección</sub></td>
+    <td align="center"><img src="docs/screenshots/03-descanso.png" width="260" alt="En el descanso"><br><sub>En el descanso: el botón pasa a ámbar</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/04-horas.png" width="260" alt="Panel de horas"><br><sub>Panel de horas del equipo, con bajas y aprobación semanal</sub></td>
+    <td align="center"><img src="docs/screenshots/05-fichajes.png" width="260" alt="Fichajes de una persona"><br><sub>Corregir o añadir fichajes, con auditoría</sub></td>
+    <td align="center"><img src="docs/screenshots/06-horario.png" width="260" alt="Horario semanal"><br><sub>Horario semanal con descansos y una baja médica</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/07-vacaciones.png" width="260" alt="Vacaciones"><br><sub>Personal disponible por día y solicitudes pendientes</sub></td>
+    <td></td>
+    <td></td>
+  </tr>
+</table>
+
 ---
 
 ## Funcionalidades
