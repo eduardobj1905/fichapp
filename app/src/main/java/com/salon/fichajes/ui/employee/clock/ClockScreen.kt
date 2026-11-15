@@ -65,6 +65,12 @@ import com.salon.fichajes.core.format.formatShortDate
 import com.salon.fichajes.core.format.formatStopwatch
 import com.salon.fichajes.core.format.formatTime
 import com.salon.fichajes.domain.model.ClockEntry
+import androidx.compose.material.icons.filled.FreeBreakfast
+import androidx.compose.ui.unit.Dp
+import com.salon.fichajes.core.format.formatShort
+import com.salon.fichajes.domain.hours.ApprovalStatus
+import com.salon.fichajes.domain.model.WorkState
+import com.salon.fichajes.ui.theme.WarningAmber
 import com.salon.fichajes.ui.components.CorrectionNote
 import com.salon.fichajes.ui.components.EmployeeAvatar
 import com.salon.fichajes.ui.components.EmptyMessage
@@ -157,7 +163,12 @@ fun ClockScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center,
                     ) {
-                        ClockButtonSection(state, onClick = viewModel::onClockButton)
+                        ClockButtonSection(
+                            state,
+                            onClick = viewModel::onClockButton,
+                            onBreak = viewModel::onBreakButton,
+                            onFinishDay = viewModel::finishDayFromBreak,
+                        )
                     }
                     Column(Modifier.weight(1f).fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         CorrectionsBanner(state, onAcknowledge = viewModel::acknowledgeCorrections)
@@ -172,7 +183,13 @@ fun ClockScreen(
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     CorrectionsBanner(state, onAcknowledge = viewModel::acknowledgeCorrections)
-                    ClockButtonSection(state, onClick = viewModel::onClockButton)
+                    ClockButtonSection(
+                        state,
+                        onClick = viewModel::onClockButton,
+                        onBreak = viewModel::onBreakButton,
+                        onFinishDay = viewModel::finishDayFromBreak,
+                        buttonSize = 190.dp,
+                    )
                     SummaryCards(state)
                     RecentEntries(state.recent, state.zone, state.staffNames, Modifier.weight(1f))
                 }
@@ -182,12 +199,33 @@ fun ClockScreen(
 }
 
 @Composable
-private fun ClockButtonSection(state: ClockUiState, onClick: () -> Unit) {
+private fun ClockButtonSection(
+    state: ClockUiState,
+    onClick: () -> Unit,
+    onBreak: () -> Unit,
+    onFinishDay: () -> Unit,
+    buttonSize: Dp = 240.dp,
+) {
     val working = state.isWorking
-    val color by animateColorAsState(if (working) ClockOutRed else ClockInGreen, label = "clockButtonColor")
-    val label = if (working) "FICHAR\nSALIDA" else "FICHAR\nENTRADA"
+    val onBreakNow = state.workState as? WorkState.OnBreak
+    // Verde = entrar, rojo = salir, ámbar = volver del descanso.
+    val color by animateColorAsState(
+        when {
+            working -> ClockOutRed
+            onBreakNow != null -> WarningAmber
+            else -> ClockInGreen
+        },
+        label = "clockButtonColor",
+    )
+    val label = when {
+        working -> "FICHAR\nSALIDA"
+        onBreakNow != null -> "VOLVER DEL\nDESCANSO"
+        else -> "FICHAR\nENTRADA"
+    }
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        TodayPlan(state)
+        Spacer(Modifier.height(12.dp))
         Button(
             onClick = onClick,
             enabled = !state.isProcessing,
@@ -200,12 +238,21 @@ private fun ClockButtonSection(state: ClockUiState, onClick: () -> Unit) {
             ),
             elevation = ButtonDefaults.buttonElevation(defaultElevation = 8.dp),
             modifier = Modifier
-                .size(240.dp)
+                .size(buttonSize)
                 .semantics { contentDescription = label.replace('\n', ' ') },
         ) {
-            Text(label, fontSize = 30.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, lineHeight = 36.sp)
+            // "VOLVER DEL DESCANSO" es más largo: letra algo menor para que no parta palabras en el móvil.
+            val long = label.length > 16
+            Text(
+                label,
+                fontSize = if (long) 22.sp else 28.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                lineHeight = if (long) 28.sp else 34.sp,
+                softWrap = false,
+            )
         }
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(12.dp))
         val open = state.openEntry
         if (open != null) {
             Text("Trabajando desde las ${open.clockIn.formatTime(state.zone)}", style = MaterialTheme.typography.titleMedium)
@@ -214,12 +261,53 @@ private fun ClockButtonSection(state: ClockUiState, onClick: () -> Unit) {
                 style = MaterialTheme.typography.displayMedium,
                 fontWeight = FontWeight.Light,
             )
+            FilledTonalButton(onClick = onBreak, enabled = !state.isProcessing) {
+                Icon(Icons.Filled.FreeBreakfast, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Empezar descanso")
+            }
+        } else if (onBreakNow != null) {
+            val planned = state.todayShifts.firstOrNull { it.hasBreak }?.breakDuration
+            Text(
+                "En el descanso desde las ${onBreakNow.since.formatTime(state.zone)}" +
+                    (planned?.let { " · previsto ${it.formatHoursMinutes()}" } ?: ""),
+                style = MaterialTheme.typography.titleMedium,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                state.breakElapsed.formatStopwatch(),
+                style = MaterialTheme.typography.displayMedium,
+                fontWeight = FontWeight.Light,
+                color = if (planned != null && state.breakElapsed > planned) ClockOutRed else Color.Unspecified,
+            )
+            TextButton(onClick = onFinishDay, enabled = !state.isProcessing) { Text("No vuelvo hoy: terminar la jornada") }
         } else {
             Text("Ahora mismo no estás fichada", style = MaterialTheme.typography.titleMedium)
             Text("--:--:--", style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Light,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
+}
+
+/** "Hoy: 10:00–19:00 · descanso 14:00–15:00", o el aviso de baja. */
+@Composable
+private fun TodayPlan(state: ClockUiState) {
+    val absence = state.absenceToday
+    val text = when {
+        absence != null -> "Hoy figuras de ${absence.type.label.lowercase()}" +
+            (absence.endDate?.let { " hasta el ${it.formatShort()}" } ?: "")
+        state.todayShifts.isEmpty() -> "Hoy no tienes turno en el horario"
+        else -> "Hoy: " + state.todayShifts.joinToString(" y ") { shift ->
+            "${shift.start.formatTime()}–${shift.end.formatTime()}" +
+                if (shift.hasBreak) " · descanso ${shift.breakStart!!.formatTime()}–${shift.breakEnd!!.formatTime()}" else ""
+        }
+    }
+    Text(
+        text,
+        style = MaterialTheme.typography.bodyLarge,
+        textAlign = TextAlign.Center,
+        color = if (absence != null) ClockOutRed else MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 @Composable
@@ -235,6 +323,15 @@ private fun SummaryCards(state: ClockUiState) {
             )
         }
         LinearProgressIndicator(progress = { state.weekProgress }, modifier = Modifier.fillMaxWidth().height(8.dp))
+        Text(
+            when (state.lastWeekStatus) {
+                ApprovalStatus.APPROVED -> "Semana pasada: horas aprobadas" + (state.lastWeekApprovedBy?.let { " por $it" } ?: "")
+                ApprovalStatus.CHANGED -> "Semana pasada: se corrigió tras aprobarse, pendiente de revisar"
+                ApprovalStatus.PENDING -> "Semana pasada: horas pendientes de aprobar"
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -298,7 +395,8 @@ private fun RecentEntryRow(entry: ClockEntry, zone: ZoneId, adminName: String?) 
         },
         headlineContent = {
             Text(
-                "${entry.clockIn.formatTime(zone)} – ${out?.formatTime(zone) ?: "en curso"}",
+                "${entry.clockIn.formatTime(zone)} – ${out?.formatTime(zone) ?: "en curso"}" +
+                    if (entry.endedForBreak) " · salida a descanso" else "",
                 fontWeight = if (out == null) FontWeight.Bold else FontWeight.Normal,
             )
         },

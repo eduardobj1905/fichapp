@@ -6,11 +6,14 @@ import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Update
 import com.salon.fichajes.data.local.entity.ClockEntryEntity
+import com.salon.fichajes.data.local.entity.toDomain
 import com.salon.fichajes.domain.model.ClockResult
 import com.salon.fichajes.domain.model.ClockSource
+import com.salon.fichajes.domain.model.WorkState
 import kotlinx.coroutines.flow.Flow
 import java.time.Duration
 import java.time.Instant
+import java.time.ZoneId
 
 @Dao
 abstract class ClockEntryDao {
@@ -27,8 +30,24 @@ abstract class ClockEntryDao {
     @Update
     protected abstract suspend fun update(entry: ClockEntryEntity)
 
-    @Query("UPDATE clock_entries SET clockOut = :clockOut WHERE id = :id AND clockOut IS NULL")
-    protected abstract suspend fun close(id: Long, clockOut: Instant): Int
+    @Query("UPDATE clock_entries SET clockOut = :clockOut, endedForBreak = :forBreak WHERE id = :id AND clockOut IS NULL")
+    protected abstract suspend fun close(id: Long, clockOut: Instant, forBreak: Boolean = false): Int
+
+    @Query("SELECT * FROM clock_entries WHERE employeeId = :employeeId ORDER BY clockIn DESC LIMIT 1")
+    abstract suspend fun findLatest(employeeId: Long): ClockEntryEntity?
+
+    /** La empleada salió a descansar pero decide no volver: esa salida pasa a ser el fin de la jornada. */
+    @Query("UPDATE clock_entries SET endedForBreak = 0 WHERE id = :id")
+    abstract suspend fun markBreakAsFinalExit(id: Long)
+
+    @Query(
+        """
+        SELECT * FROM clock_entries
+        WHERE employeeId = :employeeId AND clockIn < :to AND (clockOut IS NULL OR clockOut > :from)
+        ORDER BY clockIn
+        """
+    )
+    abstract suspend fun getOverlapping(employeeId: Long, from: Instant, to: Instant): List<ClockEntryEntity>
 
     @Query(
         """
@@ -44,12 +63,18 @@ abstract class ClockEntryDao {
      * dos toques casi simultáneos no pueden crear dos tramos abiertos.
      */
     @Transaction
-    open suspend fun toggle(employeeId: Long, now: Instant, maxOpen: Duration): ClockResult {
+    open suspend fun toggle(employeeId: Long, now: Instant, maxOpen: Duration, zone: ZoneId): ClockResult {
         val open = findOpen(employeeId)
-            ?: run {
-                insert(ClockEntryEntity(employeeId = employeeId, clockIn = now, source = ClockSource.TABLET_PIN))
-                return ClockResult.ClockedIn(now)
+        if (open == null) {
+            // Si había salido a descansar hoy, esta entrada es la vuelta del descanso.
+            val state = WorkState.from(findLatest(employeeId)?.toDomain(), now, zone)
+            insert(ClockEntryEntity(employeeId = employeeId, clockIn = now, source = ClockSource.TABLET_PIN))
+            return if (state is WorkState.OnBreak) {
+                ClockResult.BreakEnded(now, Duration.between(state.since, now))
+            } else {
+                ClockResult.ClockedIn(now)
             }
+        }
         val elapsed = Duration.between(open.clockIn, now)
         // Más de maxOpen (olvido de salida) o tiempo negativo (hora del dispositivo cambiada): lo revisa la jefa.
         if (elapsed > maxOpen || elapsed.isNegative) {
@@ -57,6 +82,18 @@ abstract class ClockEntryDao {
         }
         close(open.id, now)
         return ClockResult.ClockedOut(now, elapsed)
+    }
+
+    /** Cierra el tramo en curso marcándolo como salida a descanso (el descanso no cuenta como trabajado). */
+    @Transaction
+    open suspend fun startBreak(employeeId: Long, now: Instant, maxOpen: Duration): ClockResult {
+        val open = findOpen(employeeId) ?: throw IllegalStateException("No estás fichada: no puedes empezar un descanso")
+        val elapsed = Duration.between(open.clockIn, now)
+        if (elapsed > maxOpen || elapsed.isNegative) {
+            return ClockResult.NeedsAdminReview(open.clockIn)
+        }
+        close(open.id, now, forBreak = true)
+        return ClockResult.BreakStarted(now, elapsed)
     }
 
     /**

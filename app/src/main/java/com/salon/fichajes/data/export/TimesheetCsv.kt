@@ -42,6 +42,8 @@ object TimesheetCsv {
         entries: List<ClockEntry>,
         targets: Map<Long, Duration>,
         now: Instant,
+        /** Solo al exportar una semana: estado de la aprobación de horas por empleada. */
+        approvalLabels: Map<Long, String>? = null,
     ): String {
         val names = employees.associate { it.id to it.name }
         fun nameOf(id: Long?) = id?.let { names[it] ?: "#$it" }.orEmpty()
@@ -60,7 +62,7 @@ object TimesheetCsv {
                 out == null -> "en curso"
                 out.atZone(zone).toLocalDate() != inZoned.toLocalDate() -> timeFormat.format(out.atZone(zone)) + " (+1)"
                 else -> timeFormat.format(out.atZone(zone))
-            }
+            } + if (entry.endedForBreak && out != null) " (descanso)" else ""
             lines += listOf(
                 nameOf(entry.employeeId),
                 dateFormat.format(inZoned),
@@ -78,7 +80,8 @@ object TimesheetCsv {
 
         lines += emptyList<String>()
         lines += listOf("RESUMEN")
-        lines += listOf("Empleada", "Horas trabajadas", "Horas de contrato", "Diferencia")
+        lines += listOf("Empleada", "Horas trabajadas", "Horas de contrato", "Diferencia") +
+            (if (approvalLabels != null) listOf("Aprobación") else emptyList())
         val byEmployee = entries.groupBy { it.employeeId }
         val ids = (byEmployee.keys + targets.keys).sortedBy { nameOf(it).lowercase() }
         for (id in ids) {
@@ -89,7 +92,7 @@ object TimesheetCsv {
                 hours(worked),
                 target?.let(::hours).orEmpty(),
                 target?.let { signedHours(worked - it) }.orEmpty(),
-            )
+            ) + (if (approvalLabels != null) listOf(approvalLabels[id] ?: "Pendiente de aprobar") else emptyList())
         }
 
         return lines.joinToString(NEW_LINE, postfix = NEW_LINE) { row -> row.joinToString(SEP) { escape(it) } }

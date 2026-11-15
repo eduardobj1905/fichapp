@@ -34,6 +34,7 @@ import com.salon.fichajes.core.security.PasswordRules
 import com.salon.fichajes.core.security.PinHasher
 import com.salon.fichajes.domain.repository.OwnerSecurityRepository
 import com.salon.fichajes.session.SessionManager
+import com.salon.fichajes.ui.components.SalonHeader
 import com.salon.fichajes.ui.security.PasswordField
 import com.salon.fichajes.ui.security.PinField
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -45,7 +46,7 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 enum class SetupStep {
-    /** Lo rellena quien instala la app (p. ej. Eduardo). */
+    /** Lo rellena quien instala la app (p. ej. quien lleva la informática del salón). */
     SALON,
     /** Lo rellena SOLO la dueña: su PIN y su contraseña maestra. */
     OWNER_SECRETS,
@@ -144,7 +145,8 @@ fun SetupScreen(viewModel: SetupViewModel = hiltViewModel()) {
 private fun SalonStep(state: SetupUiState, onNext: (String, String) -> Unit) {
     var name by rememberSaveable { mutableStateOf(state.ownerName) }
     var hours by rememberSaveable { mutableStateOf(state.weeklyHours) }
-    Text("Configurar Fichapp", style = MaterialTheme.typography.headlineLarge)
+    SalonHeader()
+    Text("Configurar los fichajes", style = MaterialTheme.typography.headlineMedium)
     Text("Paso 1 de 2 · Datos de la dueña del salón", style = MaterialTheme.typography.titleMedium)
     Text(
         "La dueña es el perfil maestro: podrá dar de alta al equipo, nombrar encargadas y corregir horas.",

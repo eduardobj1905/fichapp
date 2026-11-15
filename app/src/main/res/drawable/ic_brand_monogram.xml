@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Monograma genérico "F" (Fichapp) en recuadro. Cada salón puede sustituirlo por el suyo en su variante.
+    Lienzo de 108x108 (tamaño de icono adaptativo); el dibujo queda dentro de la zona segura central.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Recuadro fino -->
+    <path
+        android:strokeColor="#1C1B1A"
+        android:strokeWidth="1.6"
+        android:pathData="M33,33 H75 V75 H33 Z" />
+
+    <!-- F: asta gruesa (estilo Didone), brazos finos y remate al pie -->
+    <path
+        android:strokeColor="#1C1B1A"
+        android:strokeWidth="3.6"
+        android:pathData="M49,39 V69" />
+    <path
+        android:strokeColor="#1C1B1A"
+        android:strokeWidth="1.5"
+        android:pathData="M47.2,39 H65 V43.5" />
+    <path
+        android:strokeColor="#1C1B1A"
+        android:strokeWidth="1.4"
+        android:pathData="M50.8,53.5 H60.5 M60.5,51 V56" />
+    <path
+        android:strokeColor="#1C1B1A"
+        android:strokeWidth="1.2"
+        android:pathData="M44,69 H55" />
+</vector>

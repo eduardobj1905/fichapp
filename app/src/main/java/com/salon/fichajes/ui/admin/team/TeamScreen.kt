@@ -196,7 +196,7 @@ private fun RoleSelector(selected: Role, onSelect: (Role) -> Unit) {
                     Text(role.label)
                     Text(
                         when (role) {
-                            Role.MANAGER -> "Corrige fichajes, hace horarios y aprueba vacaciones de las demás (no los suyos)."
+                            Role.MANAGER -> "Corrige fichajes, aprueba horas, hace horarios y registra bajas de las demás (no los suyos). Las vacaciones las aprueba la dueña."
                             else -> "Ficha y pide vacaciones."
                         },
                         style = MaterialTheme.typography.bodySmall,

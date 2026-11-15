@@ -44,6 +44,8 @@ object DatabaseModule {
     @Provides fun shiftDao(db: AppDatabase): ShiftDao = db.shiftDao()
     @Provides fun vacationDao(db: AppDatabase): VacationDao = db.vacationDao()
     @Provides fun ownerCredentialDao(db: AppDatabase): OwnerCredentialDao = db.ownerCredentialDao()
+    @Provides fun absenceDao(db: AppDatabase): com.salon.fichajes.data.local.dao.AbsenceDao = db.absenceDao()
+    @Provides fun weekApprovalDao(db: AppDatabase): com.salon.fichajes.data.local.dao.WeekApprovalDao = db.weekApprovalDao()
 }
 
 @Module
@@ -64,4 +66,10 @@ abstract class RepositoryModule {
     @Binds abstract fun vacationRepository(impl: RoomVacationRepository): VacationRepository
     @Binds abstract fun scheduleRepository(impl: RoomScheduleRepository): ScheduleRepository
     @Binds abstract fun ownerSecurityRepository(impl: RoomOwnerSecurityRepository): OwnerSecurityRepository
+    @Binds abstract fun absenceRepository(
+        impl: com.salon.fichajes.data.repository.RoomAbsenceRepository,
+    ): com.salon.fichajes.domain.repository.AbsenceRepository
+    @Binds abstract fun weekApprovalRepository(
+        impl: com.salon.fichajes.data.repository.RoomWeekApprovalRepository,
+    ): com.salon.fichajes.domain.repository.WeekApprovalRepository
 }

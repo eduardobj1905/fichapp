@@ -8,3 +8,6 @@ build/
 .externalNativeBuild
 .cxx
 .kotlin/
+
+# Marca privada de un salón concreto (nombre, logo): no se publica
+/app/src/salon/

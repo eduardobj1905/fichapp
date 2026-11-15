@@ -1,4 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!--
+        Marca genérica (versión "demo", la que se publica).
+        Un salón concreto sobrescribe estos tres textos y el monograma en su propia variante
+        (app/src/<variante>/res), que puede quedarse fuera del repositorio.
+    -->
     <string name="app_name">Fichapp</string>
+    <string name="salon_name">Tu Salón</string>
+    <string name="salon_tagline">PELUQUERÍA · FICHAJES</string>
+    <string name="product_name">Fichajes · Fichapp</string>
 </resources>

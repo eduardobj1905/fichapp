@@ -20,6 +20,19 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // Marca de la app. "demo" es la genérica que se publica; "salon" toma el nombre y el logo de
+    // app/src/salon/res, una carpeta privada que no está en el repositorio (si no existe, sale igual que demo).
+    flavorDimensions += "marca"
+    productFlavors {
+        create("demo") {
+            dimension = "marca"
+            isDefault = true
+        }
+        create("salon") {
+            dimension = "marca"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false

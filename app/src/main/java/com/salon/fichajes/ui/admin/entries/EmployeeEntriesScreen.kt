@@ -167,7 +167,8 @@ private fun DayCard(
                         val out = entry.clockOut
                         Text(
                             "${entry.clockIn.formatTime(zone)} – ${out?.formatTime(zone) ?: "en curso"}" +
-                                (out?.let { "  ·  " + Duration.between(entry.clockIn, it).formatHoursMinutes() } ?: ""),
+                                (out?.let { "  ·  " + Duration.between(entry.clockIn, it).formatHoursMinutes() } ?: "") +
+                                (if (entry.endedForBreak) "  ·  salida a descanso" else ""),
                         )
                         CorrectionNote(entry, zone, adminName = entry.correctedBy?.let(adminNames::get))
                     }

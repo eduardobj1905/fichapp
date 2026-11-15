@@ -8,11 +8,22 @@ import com.salon.fichajes.core.format.formatTime
 import com.salon.fichajes.core.time.Periods
 import com.salon.fichajes.core.time.WorkedTime
 import com.salon.fichajes.core.time.tickerFlow
+import com.salon.fichajes.domain.hours.ApprovalStatus
+import com.salon.fichajes.domain.hours.approvalStatus
+import com.salon.fichajes.domain.hours.targetFor
+import com.salon.fichajes.domain.model.Absence
 import com.salon.fichajes.domain.model.ClockEntry
 import com.salon.fichajes.domain.model.ClockResult
 import com.salon.fichajes.domain.model.Employee
+import com.salon.fichajes.domain.model.Shift
+import com.salon.fichajes.domain.model.WeekApproval
+import com.salon.fichajes.domain.model.WorkState
+import com.salon.fichajes.domain.repository.AbsenceRepository
 import com.salon.fichajes.domain.repository.ClockRepository
 import com.salon.fichajes.domain.repository.EmployeeRepository
+import com.salon.fichajes.domain.repository.ScheduleRepository
+import com.salon.fichajes.domain.repository.WeekApprovalRepository
+import java.time.LocalDate
 import com.salon.fichajes.session.SessionManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -55,8 +66,18 @@ data class ClockUiState(
     /** Fichajes que la jefa ha modificado o añadido y la empleada aún no ha visto. */
     val unseenCorrections: List<ClockEntry> = emptyList(),
     val staffNames: Map<Long, String> = emptyMap(),
+    /** Fuera / trabajando / en el descanso. */
+    val workState: WorkState = WorkState.Off,
+    val breakElapsed: Duration = Duration.ZERO,
+    /** Turnos de hoy según el horario (con su descanso previsto). */
+    val todayShifts: List<Shift> = emptyList(),
+    /** Baja o ausencia que cubre hoy, si la hay. */
+    val absenceToday: Absence? = null,
+    val lastWeekStatus: ApprovalStatus = ApprovalStatus.PENDING,
+    val lastWeekApprovedBy: String? = null,
 ) {
     val isWorking: Boolean get() = openEntry != null
+    val isOnBreak: Boolean get() = workState is WorkState.OnBreak
     val weekProgress: Float
         get() = if (weekTarget.isZero) 0f else (week.toMinutes().toFloat() / weekTarget.toMinutes()).coerceIn(0f, 1f)
 }
@@ -72,6 +93,9 @@ sealed interface ClockEvent {
 class ClockViewModel @Inject constructor(
     private val clockRepository: ClockRepository,
     employeeRepository: EmployeeRepository,
+    scheduleRepository: ScheduleRepository,
+    absenceRepository: AbsenceRepository,
+    weekApprovalRepository: WeekApprovalRepository,
     private val sessionManager: SessionManager,
     private val clock: Clock,
 ) : ViewModel() {
@@ -94,22 +118,44 @@ class ClockViewModel @Inject constructor(
         .distinctUntilChanged()
         .flatMapLatest { range -> clockRepository.observeOverlapping(employeeId, range) }
 
-    // Equipo (para poner nombre a quien corrigió) + cambios de la jefa aún no vistos.
-    private val staffAndCorrections = combine(
+    private data class Planning(
+        val todayShifts: List<Shift>,
+        val weekAbsences: List<Absence>,
+        val lastWeekApproval: WeekApproval?,
+        val lastWeekEntries: List<ClockEntry>,
+    )
+
+    // La sesión dura minutos: basta con fijar "hoy" y "esta semana" al entrar.
+    private val todayDate = LocalDate.now(clock)
+    private val monday = Periods.weekStart(todayDate)
+    private val lastMonday = monday.minusWeeks(1)
+
+    private val planning = combine(
+        scheduleRepository.observeBetween(todayDate, todayDate).map { list -> list.filter { it.employeeId == employeeId } },
+        absenceRepository.observeOverlapping(monday, monday.plusDays(6)).map { list -> list.filter { it.employeeId == employeeId } },
+        weekApprovalRepository.observeForEmployee(employeeId, limit = 4).map { list -> list.firstOrNull { it.weekStart == lastMonday } },
+        clockRepository.observeOverlapping(employeeId, Periods.week(lastMonday, zone)),
+    ) { shifts, absences, approval, lastWeek -> Planning(shifts, absences, approval, lastWeek) }
+
+    // Equipo (para poner nombre a quien corrigió) + cambios de la jefa aún no vistos + horario.
+    private val context = combine(
         employeeRepository.observeActive(),
         clockRepository.observeUnseenCorrections(employeeId),
-    ) { staff, unseen -> staff to unseen }
+        planning,
+    ) { staff, unseen, plan -> Triple(staff, unseen, plan) }
 
     val uiState: StateFlow<ClockUiState> = combine(
-        staffAndCorrections,
+        context,
         clockRepository.observeRecent(employeeId, limit = 15),
         weekEntries,
         isProcessing,
         ticker,
-    ) { (staff, unseen), recent, week, processing, now ->
+    ) { (staff, unseen, plan), recent, week, processing, now ->
         val today = now.atZone(zone).toLocalDate()
         val open = recent.firstOrNull { it.isOpen }
         val employee = staff.firstOrNull { it.id == employeeId }
+        val workState = WorkState.from(recent.firstOrNull(), now, zone)
+        val lastWeekWorked = WorkedTime.between(plan.lastWeekEntries, Periods.week(lastMonday, zone), now)
         ClockUiState(
             isLoading = false,
             employee = employee,
@@ -121,11 +167,79 @@ class ClockViewModel @Inject constructor(
             currentElapsed = open?.let { Duration.between(it.clockIn, now) } ?: Duration.ZERO,
             today = WorkedTime.between(week, Periods.day(today, zone), now),
             week = WorkedTime.between(week, Periods.week(today, zone), now),
-            weekTarget = Duration.ofMinutes(((employee?.weeklyContractHours ?: 0.0) * 60).toLong()),
+            // Los días de baja no cuentan para el objetivo de horas.
+            weekTarget = targetFor(employee?.weeklyContractHours ?: 0.0, monday, monday.plusDays(6), plan.weekAbsences),
             recent = recent,
             isProcessing = processing,
+            workState = workState,
+            breakElapsed = (workState as? WorkState.OnBreak)?.let { Duration.between(it.since, now) } ?: Duration.ZERO,
+            todayShifts = plan.todayShifts,
+            absenceToday = plan.weekAbsences.firstOrNull { it.covers(today) },
+            lastWeekStatus = approvalStatus(plan.lastWeekApproval, lastWeekWorked),
+            lastWeekApprovedBy = plan.lastWeekApproval?.let { staff.firstOrNull { e -> e.id == it.approvedBy }?.name },
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ClockUiState())
+
+    /** Empieza el descanso: cierra el tramo actual marcándolo como salida a descanso. */
+    fun onBreakButton() {
+        if (isProcessing.value) return
+        isProcessing.value = true
+        viewModelScope.launch {
+            runCatching { clockRepository.startBreak(employeeId) }
+                .onSuccess { r -> handleResult(r) }
+                .onFailure {
+                    _events.send(ClockEvent.Message(it.message ?: "No se ha podido fichar el descanso"))
+                    isProcessing.value = false
+                }
+        }
+    }
+
+    /** En el descanso, pero no vuelve hoy: esa salida pasa a ser el final de la jornada. */
+    fun finishDayFromBreak() {
+        if (isProcessing.value) return
+        isProcessing.value = true
+        viewModelScope.launch {
+            clockRepository.finishDayFromBreak(employeeId)
+            _events.send(ClockEvent.Message("Jornada terminada. ¡Hasta mañana!"))
+            scheduleAutoLogout()
+        }
+    }
+
+    private suspend fun handleResult(r: ClockResult) {
+        when (r) {
+            is ClockResult.ClockedIn -> {
+                _events.send(ClockEvent.ClockedSuccessfully)
+                _events.send(ClockEvent.Message("Entrada registrada a las ${r.at.formatTime(zone)}. ¡Buen día!"))
+                scheduleAutoLogout()
+            }
+            is ClockResult.ClockedOut -> {
+                _events.send(ClockEvent.ClockedSuccessfully)
+                _events.send(ClockEvent.Message("Salida a las ${r.at.formatTime(zone)} · ${r.worked.formatHoursMinutes()} trabajadas"))
+                scheduleAutoLogout()
+            }
+            is ClockResult.BreakStarted -> {
+                _events.send(ClockEvent.ClockedSuccessfully)
+                _events.send(ClockEvent.Message("Descanso desde las ${r.at.formatTime(zone)}. Ficha la vuelta al terminar."))
+                scheduleAutoLogout()
+            }
+            is ClockResult.BreakEnded -> {
+                _events.send(ClockEvent.ClockedSuccessfully)
+                _events.send(
+                    ClockEvent.Message("Vuelta del descanso a las ${r.at.formatTime(zone)} · descanso de ${r.breakDuration.formatHoursMinutes()}")
+                )
+                scheduleAutoLogout()
+            }
+            is ClockResult.NeedsAdminReview -> {
+                _events.send(
+                    ClockEvent.Message(
+                        "Tienes una entrada abierta desde el ${r.openSince.formatDateTime(zone)}. " +
+                            "Avisa a la encargada para que la corrija."
+                    )
+                )
+                isProcessing.value = false
+            }
+        }
+    }
 
     fun onClockButton() {
         // Anti doble toque: si ya hay un fichaje en marcha (o se acaba de fichar), se ignora.
@@ -133,29 +247,7 @@ class ClockViewModel @Inject constructor(
         isProcessing.value = true
         viewModelScope.launch {
             val result = runCatching { clockRepository.toggle(employeeId) }
-            result.onSuccess { r ->
-                when (r) {
-                    is ClockResult.ClockedIn -> {
-                        _events.send(ClockEvent.ClockedSuccessfully)
-                        _events.send(ClockEvent.Message("Entrada registrada a las ${r.at.formatTime(zone)}. ¡Buen día!"))
-                        scheduleAutoLogout()
-                    }
-                    is ClockResult.ClockedOut -> {
-                        _events.send(ClockEvent.ClockedSuccessfully)
-                        _events.send(ClockEvent.Message("Salida a las ${r.at.formatTime(zone)} · ${r.worked.formatHoursMinutes()} trabajadas"))
-                        scheduleAutoLogout()
-                    }
-                    is ClockResult.NeedsAdminReview -> {
-                        _events.send(
-                            ClockEvent.Message(
-                                "Tienes una entrada abierta desde el ${r.openSince.formatDateTime(zone)}. " +
-                                    "Avisa a la encargada para que la corrija."
-                            )
-                        )
-                        isProcessing.value = false
-                    }
-                }
-            }.onFailure {
+            result.onSuccess { r -> handleResult(r) }.onFailure {
                 _events.send(ClockEvent.Message("No se ha podido fichar. Inténtalo de nuevo."))
                 isProcessing.value = false
             }

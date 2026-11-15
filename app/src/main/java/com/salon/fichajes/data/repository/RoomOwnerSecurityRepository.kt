@@ -139,6 +139,7 @@ class RoomOwnerSecurityRepository @Inject constructor(
         withContext(Dispatchers.Default) { PinHasher.hash(secret, salt) }
 
     private companion object {
-        const val OWNER_COLOR = 0xFF8E24AA
+        /** Carbón del logo: la dueña sale con el color principal de la marca. */
+        const val OWNER_COLOR = 0xFF1C1B1A
     }
 }

@@ -5,6 +5,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material3.OutlinedButton
 import com.salon.fichajes.ui.components.PeriodNavigator
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.HourglassEmpty
+import com.salon.fichajes.domain.hours.ApprovalStatus
+import com.salon.fichajes.ui.theme.ClockOutRed
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -142,7 +147,12 @@ fun HoursDashboardScreen(
             item(span = { GridItemSpan(maxLineSpan) }) { EmptyMessage("Da de alta a tu equipo en la pestaña Equipo.") }
         }
         items(state.rows, key = { it.employee.id }) { row ->
-            EmployeeHoursCard(row, state.zone, onClick = { onOpenEmployee(row.employee.id) })
+            EmployeeHoursCard(
+                row,
+                state.zone,
+                onClick = { onOpenEmployee(row.employee.id) },
+                onApprove = { viewModel.approveWeek(row.employee) },
+            )
         }
     }
 
@@ -160,7 +170,7 @@ fun HoursDashboardScreen(
 }
 
 @Composable
-private fun EmployeeHoursCard(row: EmployeeHoursRow, zone: ZoneId, onClick: () -> Unit) {
+private fun EmployeeHoursCard(row: EmployeeHoursRow, zone: ZoneId, onClick: () -> Unit, onApprove: () -> Unit) {
     Card(onClick = onClick) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -179,6 +189,11 @@ private fun EmployeeHoursCard(row: EmployeeHoursRow, zone: ZoneId, onClick: () -
                         Text("En el salón desde ${it.formatTime(zone)}", modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
                     }
                 }
+                row.absenceToday?.let {
+                    Badge(containerColor = ClockOutRed, contentColor = Color.White) {
+                        Text(it.type.label, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                    }
+                }
             }
             Spacer(Modifier.height(12.dp))
             LinearProgressIndicator(
@@ -186,6 +201,35 @@ private fun EmployeeHoursCard(row: EmployeeHoursRow, zone: ZoneId, onClick: () -
                 color = Color(row.employee.colorArgb),
                 modifier = Modifier.fillMaxWidth().height(8.dp),
             )
+            // Aprobación semanal de horas (solo en la vista Semana).
+            row.approval?.let { status ->
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        when (status) {
+                            ApprovalStatus.APPROVED -> Icons.Filled.CheckCircle
+                            ApprovalStatus.CHANGED -> Icons.Filled.Warning
+                            ApprovalStatus.PENDING -> Icons.Filled.HourglassEmpty
+                        },
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = when (status) {
+                            ApprovalStatus.APPROVED -> ClockInGreen
+                            ApprovalStatus.CHANGED -> WarningAmber
+                            ApprovalStatus.PENDING -> MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        status.label + if (status == ApprovalStatus.APPROVED) row.approvedByName?.let { " por $it" }.orEmpty() else "",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (row.canApprove) {
+                        TextButton(onClick = onApprove) { Text("Aprobar semana") }
+                    }
+                }
+            }
         }
     }
 }

@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.salon.fichajes.data.settings.SalonSettings
 import com.salon.fichajes.domain.auth.Permissions
+import com.salon.fichajes.domain.repository.AbsenceRepository
 import com.salon.fichajes.session.SessionManager
 import com.salon.fichajes.domain.model.Employee
 import com.salon.fichajes.domain.model.VacationRequest
@@ -46,6 +47,7 @@ data class AdminVacationsUiState(
 @HiltViewModel
 class AdminVacationsViewModel @Inject constructor(
     private val vacationRepository: VacationRepository,
+    absenceRepository: AbsenceRepository,
     employeeRepository: EmployeeRepository,
     private val settings: SalonSettings,
     sessionManager: SessionManager,
@@ -65,14 +67,20 @@ class AdminVacationsViewModel @Inject constructor(
     private val requests = vacationRepository.observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    // Las bajas también restan personal disponible (son pocas: se observan todas).
+    private val absences = absenceRepository.observeOverlapping(LocalDate.of(2000, 1, 1), LocalDate.of(2100, 12, 31))
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    private val requestsAndAbsences = combine(requests, absences) { r, a -> r to a }
+
     val uiState: StateFlow<AdminVacationsUiState> = combine(
-        month, staff, requests, settings.minStaff, warning,
-    ) { m, employees, all, minStaff, warn ->
+        month, staff, requestsAndAbsences, settings.minStaff, warning,
+    ) { m, employees, (all, leaves), minStaff, warn ->
         val activeIds = employees.map { it.id }.toSet()
         AdminVacationsUiState(
             isLoading = false,
             month = m,
-            calendar = staffingByDay(m, activeIds, all.filter { it.status == VacationStatus.APPROVED }),
+            calendar = staffingByDay(m, activeIds, all.filter { it.status == VacationStatus.APPROVED }, leaves),
             minStaff = minStaff,
             pending = all.filter { it.status == VacationStatus.PENDING }.sortedBy { it.startDate },
             reviewed = all.filter { it.status != VacationStatus.PENDING }.take(30),
@@ -92,15 +100,14 @@ class AdminVacationsViewModel @Inject constructor(
         if (canChangeMinStaff) settings.setMinStaff(value)
     }
 
-    /** Una encargada no puede aprobarse (ni rechazarse) sus propias vacaciones. */
-    fun canReview(request: VacationRequest): Boolean =
-        Permissions.canManageStaffMember(session.role, session.employeeId, request.employeeId)
+    /** Las vacaciones solo las aprueba o rechaza la dueña; la encargada solo ve el calendario. */
+    val canReview: Boolean get() = Permissions.canReviewVacations(session.role)
 
     /** Antes de aprobar se simula la aprobación: si deja días por debajo del mínimo, se avisa. */
     fun approve(request: VacationRequest) {
         val activeIds = staff.value.map { it.id }.toSet()
         val approved = requests.value.filter { it.status == VacationStatus.APPROVED }
-        val below = daysBelowMinimumIfApproved(request, activeIds, approved, settings.minStaff.value)
+        val below = daysBelowMinimumIfApproved(request, activeIds, approved, settings.minStaff.value, absences.value)
         if (below.isEmpty()) review(request, approve = true, comment = null)
         else warning.value = StaffingWarning(request, below)
     }

@@ -41,7 +41,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -100,7 +99,7 @@ fun AdminVacationsScreen(
             PendingRequestCard(
                 request = request,
                 employee = state.employees[request.employeeId],
-                canReview = viewModel.canReview(request),
+                canReview = viewModel.canReview,
                 onApprove = { viewModel.approve(request) },
                 onReject = { rejecting = request },
             )
@@ -194,14 +193,14 @@ private fun HeatCell(day: DayStaffing, minStaff: Int) {
     val below = day.available < minStaff
     val color = when {
         below -> ClockOutRed
-        day.onVacation == 0 -> ClockInGreen
-        else -> lerp(WarningAmber, ClockInGreen, day.ratio)
+        day.away == 0 -> ClockInGreen
+        else -> WarningAmber // alguien fuera (vacaciones o baja), igual que en la leyenda
     }
     Box(
         Modifier
             .fillMaxWidth()
             .aspectRatio(1f)
-            .background(color.copy(alpha = if (day.onVacation == 0 && !below) 0.25f else 0.6f), RoundedCornerShape(6.dp))
+            .background(color.copy(alpha = if (day.away == 0 && !below) 0.25f else 0.6f), RoundedCornerShape(6.dp))
             .then(if (below) Modifier.border(2.dp, ClockOutRed, RoundedCornerShape(6.dp)) else Modifier),
         contentAlignment = Alignment.Center,
     ) {
@@ -216,7 +215,7 @@ private fun HeatCell(day: DayStaffing, minStaff: Int) {
 private fun Legend() {
     Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
         LegendDot(ClockInGreen, "Todo el equipo")
-        LegendDot(WarningAmber, "Alguien de vacaciones")
+        LegendDot(WarningAmber, "Alguien de vacaciones o de baja")
         LegendDot(ClockOutRed, "Bajo el mínimo")
     }
 }
@@ -251,8 +250,8 @@ private fun PendingRequestCard(
                 Spacer(Modifier.width(8.dp))
                 Button(onClick = onApprove) { Text("Aprobar") }
             } else {
-                // Encargada viendo su propia solicitud: no puede aprobársela ella misma.
-                Text("La revisa la dueña", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                // Encargada: ve las solicitudes para organizar el horario, pero las aprueba la dueña.
+                Text("Pendiente de la dueña", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }

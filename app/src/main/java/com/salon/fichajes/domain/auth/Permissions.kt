@@ -20,6 +20,9 @@ object Permissions {
         Role.EMPLOYEE -> false
     }
 
+    /** Aprobar o rechazar vacaciones: solo la dueña (la encargada solo ve el calendario). */
+    fun canReviewVacations(actorRole: Role): Boolean = actorRole == Role.OWNER
+
     /** Alta, baja, cambio de rol, restablecer PIN, exportar y ceder el control: solo la dueña. */
     fun canAdministerTeam(actorRole: Role): Boolean = actorRole == Role.OWNER
 

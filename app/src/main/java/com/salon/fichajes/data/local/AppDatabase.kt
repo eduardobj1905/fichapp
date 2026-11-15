@@ -6,6 +6,10 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import androidx.room.migration.AutoMigrationSpec
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.salon.fichajes.data.local.dao.AbsenceDao
+import com.salon.fichajes.data.local.dao.WeekApprovalDao
+import com.salon.fichajes.data.local.entity.AbsenceEntity
+import com.salon.fichajes.data.local.entity.WeekApprovalEntity
 import com.salon.fichajes.data.local.dao.ClockEntryDao
 import com.salon.fichajes.data.local.dao.EmployeeDao
 import com.salon.fichajes.data.local.dao.OwnerCredentialDao
@@ -24,14 +28,17 @@ import com.salon.fichajes.data.local.entity.VacationRequestEntity
         ShiftEntity::class,
         VacationRequestEntity::class,
         OwnerCredentialEntity::class,
+        AbsenceEntity::class,
+        WeekApprovalEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
     // Room genera las migraciones a partir de los esquemas exportados en app/schemas,
     // así no se pierde ningún fichaje al actualizar la app.
     autoMigrations = [
         AutoMigration(from = 1, to = 2), // columnas de auditoría en clock_entries
         AutoMigration(from = 2, to = 3, spec = AppDatabase.RolesMigration::class), // roles + contraseña maestra
+        AutoMigration(from = 3, to = 4), // descansos, bajas y aprobación semanal de horas
     ],
 )
 @TypeConverters(Converters::class)
@@ -41,6 +48,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun shiftDao(): ShiftDao
     abstract fun vacationDao(): VacationDao
     abstract fun ownerCredentialDao(): OwnerCredentialDao
+    abstract fun absenceDao(): AbsenceDao
+    abstract fun weekApprovalDao(): WeekApprovalDao
 
     /**
      * v2 → v3: el antiguo rol ADMIN pasa a ENCARGADA y la administradora más antigua activa pasa a DUEÑA.

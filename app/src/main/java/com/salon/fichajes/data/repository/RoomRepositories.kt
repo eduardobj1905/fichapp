@@ -74,7 +74,15 @@ class RoomClockRepository @Inject constructor(
     // La hora sale del Clock inyectado (nunca Instant.now()): en tests se usa Clock.fixed
     // y, al migrar a Firestore, la hora autoritativa será serverTimestamp().
     override suspend fun toggle(employeeId: Long): ClockResult =
-        dao.toggle(employeeId, clock.instant(), MAX_OPEN_ENTRY)
+        dao.toggle(employeeId, clock.instant(), MAX_OPEN_ENTRY, clock.zone)
+
+    override suspend fun startBreak(employeeId: Long): ClockResult =
+        dao.startBreak(employeeId, clock.instant(), MAX_OPEN_ENTRY)
+
+    override suspend fun finishDayFromBreak(employeeId: Long) {
+        val latest = dao.findLatest(employeeId) ?: return
+        if (latest.endedForBreak && latest.clockOut != null) dao.markBreakAsFinalExit(latest.id)
+    }
 
     override fun observeRecent(employeeId: Long, limit: Int): Flow<List<ClockEntry>> =
         dao.observeRecent(employeeId, limit).map { list -> list.map { it.toDomain() } }
@@ -216,8 +224,10 @@ class RoomVacationRepository @Inject constructor(
     }
 
     override suspend fun review(actorId: Long, requestId: Long, approve: Boolean, comment: String?) {
-        val request = requireNotNull(dao.getById(requestId)) { "La solicitud no existe" }
-        permissions.requireCanManage(actorId, request.employeeId)
+        requireNotNull(dao.getById(requestId)) { "La solicitud no existe" }
+        if (!Permissions.canReviewVacations(permissions.actor(actorId).role)) {
+            throw PermissionDeniedException("Las vacaciones solo las aprueba la dueña")
+        }
         val status = if (approve) VacationStatus.APPROVED else VacationStatus.REJECTED
         dao.review(requestId, status, clock.instant(), comment?.trim()?.ifBlank { null })
     }
@@ -235,6 +245,13 @@ class RoomScheduleRepository @Inject constructor(
     override suspend fun save(actorId: Long, shift: Shift): Long {
         permissions.requireCanManage(actorId, shift.employeeId)
         require(shift.end.isAfter(shift.start)) { "La hora de fin debe ser posterior a la de inicio" }
+        require((shift.breakStart == null) == (shift.breakEnd == null)) { "Indica el inicio y el fin del descanso" }
+        if (shift.hasBreak) {
+            val bs = shift.breakStart!!
+            val be = shift.breakEnd!!
+            require(be.isAfter(bs)) { "El descanso debe terminar después de empezar" }
+            require(!bs.isBefore(shift.start) && !be.isAfter(shift.end)) { "El descanso debe estar dentro del turno" }
+        }
         return dao.upsert(shift.toEntity())
     }
 

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Crema del salón: fondo del icono y de la ventana mientras arranca la app. -->
+    <color name="ic_launcher_background">#FAF7F2</color>
+    <color name="brand_cream">#FAF7F2</color>
+    <color name="brand_charcoal">#1C1B1A</color>
+</resources>

@@ -1,9 +1,13 @@
 package com.salon.fichajes.data.local.entity
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import com.salon.fichajes.domain.model.Absence
+import com.salon.fichajes.domain.model.AbsenceType
+import com.salon.fichajes.domain.model.WeekApproval
 import com.salon.fichajes.domain.model.ClockEntry
 import com.salon.fichajes.domain.model.ClockSource
 import com.salon.fichajes.domain.model.Employee
@@ -65,6 +69,9 @@ data class ClockEntryEntity(
     val correctedBy: Long? = null,
     /** Cuándo vio la empleada el aviso del cambio (null = pendiente de ver). */
     val correctionSeenAt: Instant? = null,
+    // v4: el tramo se cerró para hacer un descanso, no para irse a casa.
+    @ColumnInfo(defaultValue = "0")
+    val endedForBreak: Boolean = false,
 )
 
 @Entity(
@@ -85,6 +92,56 @@ data class ShiftEntity(
     val date: LocalDate,
     val start: LocalTime,
     val end: LocalTime,
+    // v4: descanso previsto dentro del turno (opcional).
+    val breakStart: LocalTime? = null,
+    val breakEnd: LocalTime? = null,
+)
+
+/** Bajas y otras ausencias. Son planificación, no registro de jornada: se pueden borrar si fueron un error. */
+@Entity(
+    tableName = "absences",
+    foreignKeys = [
+        ForeignKey(
+            entity = EmployeeEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["employeeId"],
+            onDelete = ForeignKey.RESTRICT,
+        ),
+    ],
+    indices = [Index("employeeId"), Index(value = ["startDate", "endDate"])],
+)
+data class AbsenceEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val employeeId: Long,
+    val type: AbsenceType,
+    val startDate: LocalDate,
+    /** Inclusive. Null = sigue de baja. */
+    val endDate: LocalDate? = null,
+    val note: String? = null,
+    val createdBy: Long? = null,
+    val createdAt: Instant,
+)
+
+@Entity(
+    tableName = "week_approvals",
+    primaryKeys = ["employeeId", "weekStart"],
+    foreignKeys = [
+        ForeignKey(
+            entity = EmployeeEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["employeeId"],
+            onDelete = ForeignKey.RESTRICT,
+        ),
+    ],
+    indices = [Index("weekStart")],
+)
+data class WeekApprovalEntity(
+    val employeeId: Long,
+    /** Lunes de la semana aprobada. */
+    val weekStart: LocalDate,
+    val approvedBy: Long,
+    val approvedAt: Instant,
+    val workedMinutes: Long,
 )
 
 @Entity(
@@ -153,11 +210,22 @@ fun ClockEntryEntity.toDomain() = ClockEntry(
     originalClockOut = originalClockOut,
     correctedBy = correctedBy,
     correctionSeenAt = correctionSeenAt,
+    endedForBreak = endedForBreak,
 )
 
-fun ShiftEntity.toDomain() = Shift(id = id, employeeId = employeeId, date = date, start = start, end = end)
+fun ShiftEntity.toDomain() =
+    Shift(id = id, employeeId = employeeId, date = date, start = start, end = end, breakStart = breakStart, breakEnd = breakEnd)
 
-fun Shift.toEntity() = ShiftEntity(id = id, employeeId = employeeId, date = date, start = start, end = end)
+fun Shift.toEntity() =
+    ShiftEntity(id = id, employeeId = employeeId, date = date, start = start, end = end, breakStart = breakStart, breakEnd = breakEnd)
+
+fun AbsenceEntity.toDomain() = Absence(
+    id = id, employeeId = employeeId, type = type, startDate = startDate, endDate = endDate, note = note, createdBy = createdBy,
+)
+
+fun WeekApprovalEntity.toDomain() = WeekApproval(
+    employeeId = employeeId, weekStart = weekStart, approvedBy = approvedBy, approvedAt = approvedAt, workedMinutes = workedMinutes,
+)
 
 fun VacationRequestEntity.toDomain() = VacationRequest(
     id = id,

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- El mismo monograma que ic_brand_monogram, recortado al recuadro (sin el margen del icono adaptativo) para usarlo dentro de la app. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="46"
+    android:viewportHeight="46">
+    <group
+        android:translateX="-31"
+        android:translateY="-31">
+        <path
+            android:strokeColor="#1C1B1A"
+            android:strokeWidth="1.6"
+            android:pathData="M33,33 H75 V75 H33 Z" />
+        <path
+            android:strokeColor="#1C1B1A"
+            android:strokeWidth="3.6"
+            android:pathData="M49,39 V69" />
+        <path
+            android:strokeColor="#1C1B1A"
+            android:strokeWidth="1.5"
+            android:pathData="M47.2,39 H65 V43.5" />
+        <path
+            android:strokeColor="#1C1B1A"
+            android:strokeWidth="1.4"
+            android:pathData="M50.8,53.5 H60.5 M60.5,51 V56" />
+        <path
+            android:strokeColor="#1C1B1A"
+            android:strokeWidth="1.2"
+            android:pathData="M44,69 H55" />
+    </group>
+</vector>

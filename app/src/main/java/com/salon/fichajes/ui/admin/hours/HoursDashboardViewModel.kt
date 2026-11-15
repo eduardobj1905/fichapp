@@ -11,6 +11,16 @@ import com.salon.fichajes.core.time.TimeRange
 import com.salon.fichajes.core.time.WorkedTime
 import com.salon.fichajes.core.time.tickerFlow
 import com.salon.fichajes.data.export.TimesheetExporter
+import com.salon.fichajes.domain.auth.Permissions
+import com.salon.fichajes.domain.hours.ApprovalStatus
+import com.salon.fichajes.domain.hours.approvalStatus
+import com.salon.fichajes.domain.hours.canApproveWeek
+import com.salon.fichajes.domain.hours.targetFor
+import com.salon.fichajes.domain.model.Absence
+import com.salon.fichajes.domain.model.WeekApproval
+import com.salon.fichajes.domain.repository.AbsenceRepository
+import com.salon.fichajes.domain.repository.WeekApprovalRepository
+import kotlinx.coroutines.flow.flowOf
 import com.salon.fichajes.domain.clock.CorrectionRules
 import com.salon.fichajes.domain.model.ClockEntry
 import com.salon.fichajes.domain.model.ClockRules.MAX_OPEN_ENTRY
@@ -50,6 +60,13 @@ data class EmployeeHoursRow(
     val target: Duration,
     /** Hora de entrada del tramo abierto si está trabajando ahora. */
     val workingSince: Instant?,
+    /** Solo en la vista Semana: estado de la aprobación de sus horas. */
+    val approval: ApprovalStatus? = null,
+    val approvedByName: String? = null,
+    /** La semana ha terminado y quien mira puede aprobarla (una encargada nunca la suya). */
+    val canApprove: Boolean = false,
+    /** Baja o ausencia que cubre hoy (para el aviso "De baja"). */
+    val absenceToday: Absence? = null,
 ) {
     val progress: Float
         get() = if (target.isZero) 0f else (worked.toMinutes().toFloat() / target.toMinutes()).coerceIn(0f, 1f)
@@ -79,6 +96,15 @@ private data class PeriodWindow(
     val label: String,
     val fileSuffix: String,
     val month: YearMonth,
+    /** Primer y último día del periodo (inclusive). */
+    val from: LocalDate,
+    val to: LocalDate,
+)
+
+private data class PeriodData(
+    val entries: List<ClockEntry>,
+    val approvals: List<WeekApproval>,
+    val absences: List<Absence>,
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -87,6 +113,8 @@ class HoursDashboardViewModel @Inject constructor(
     private val clockRepository: ClockRepository,
     employeeRepository: EmployeeRepository,
     private val exporter: TimesheetExporter,
+    private val weekApprovalRepository: WeekApprovalRepository,
+    private val absenceRepository: AbsenceRepository,
     private val sessionManager: SessionManager,
     private val clock: Clock,
 ) : ViewModel() {
@@ -110,27 +138,51 @@ class HoursDashboardViewModel @Inject constructor(
         ticker.map { it.atZone(zone).toLocalDate() }.distinctUntilChanged(),
     ) { p, o, today -> windowFor(p, o, today) }.distinctUntilChanged()
 
+    private val session = sessionManager.requireSession()
+
     // flatMapLatest: al cambiar de periodo se cancela la consulta anterior y se abre la nueva.
-    private val entries: Flow<List<ClockEntry>> = window.flatMapLatest { clockRepository.observeAllOverlapping(it.range) }
+    private val periodData: Flow<PeriodData> = window.flatMapLatest { w ->
+        combine(
+            clockRepository.observeAllOverlapping(w.range),
+            // Las aprobaciones son por semana: en la vista Mes no se muestran.
+            if (w.period == HoursPeriod.WEEK) weekApprovalRepository.observeForWeek(w.from) else flowOf(emptyList()),
+            absenceRepository.observeOverlapping(w.from, w.to),
+        ) { entries, approvals, absences -> PeriodData(entries, approvals, absences) }
+    }
 
     private val windowAndExporting = combine(window, isExporting) { w, exporting -> w to exporting }
 
     val uiState: StateFlow<HoursDashboardUiState> = combine(
         employeeRepository.observeActive(),
         windowAndExporting,
-        entries,
+        periodData,
         clockRepository.observeOpenEntries(),
         ticker,
-    ) { employees, (w, exporting), periodEntries, openEntries, now ->
-        val byEmployee = periodEntries.groupBy { it.employeeId }
+    ) { employees, (w, exporting), data, openEntries, now ->
+        val today = now.atZone(zone).toLocalDate()
+        val byEmployee = data.entries.groupBy { it.employeeId }
         val openByEmployee = openEntries.associateBy { it.employeeId }
+        val approvalsByEmployee = data.approvals.associateBy { it.employeeId }
+        val names = employees.associate { it.id to it.name }
+        val weekFinished = w.period == HoursPeriod.WEEK && canApproveWeek(w.from, today)
         val rows = employees.map { employee ->
             val open = openByEmployee[employee.id]?.takeIf { Duration.between(it.clockIn, now) <= MAX_OPEN_ENTRY }
+            val worked = WorkedTime.between(byEmployee[employee.id].orEmpty(), w.range, now)
+            val myAbsences = data.absences.filter { it.employeeId == employee.id }
+            val approval = approvalsByEmployee[employee.id]
+            val status = if (w.period == HoursPeriod.WEEK) approvalStatus(approval, worked) else null
             EmployeeHoursRow(
                 employee = employee,
-                worked = WorkedTime.between(byEmployee[employee.id].orEmpty(), w.range, now),
-                target = targetFor(employee, w),
-                workingSince = open?.clockIn,
+                worked = worked,
+                // Los días de baja no cuentan para el objetivo.
+                target = targetFor(employee.weeklyContractHours, w.from, w.to, myAbsences),
+                // "En el salón desde…" solo tiene sentido mirando el periodo actual.
+                workingSince = open?.clockIn?.takeIf { w.offset == 0 },
+                approval = status,
+                approvedByName = approval?.let { names[it.approvedBy] },
+                canApprove = weekFinished && status != ApprovalStatus.APPROVED &&
+                    Permissions.canManageStaffMember(session.role, session.employeeId, employee.id),
+                absenceToday = myAbsences.firstOrNull { it.covers(today) },
             )
         }.sortedWith(compareByDescending<EmployeeHoursRow> { it.isWorking }.thenBy { it.employee.name.lowercase() })
 
@@ -167,7 +219,13 @@ class HoursDashboardViewModel @Inject constructor(
         isExporting.value = true
         viewModelScope.launch {
             runCatching {
-                exporter.export(uri, w.label, w.range, state.rows.associate { it.employee.id to it.target })
+                exporter.export(
+                    uri = uri,
+                    periodLabel = w.label,
+                    range = w.range,
+                    targets = state.rows.associate { it.employee.id to it.target },
+                    weekStart = if (w.period == HoursPeriod.WEEK) w.from else null,
+                )
             }.onSuccess { count -> _messages.send("Hoja de horas exportada ($count fichajes)") }
                 .onFailure { _messages.send("No se ha podido exportar: ${it.message}") }
             isExporting.value = false
@@ -191,6 +249,16 @@ class HoursDashboardViewModel @Inject constructor(
         }
     }
 
+    /** Aprueba las horas de la semana que se está viendo (debe haber terminado). */
+    fun approveWeek(employee: Employee) {
+        val w = windowFor(HoursPeriod.WEEK, offset.value, LocalDate.now(clock))
+        viewModelScope.launch {
+            runCatching { weekApprovalRepository.approve(session.employeeId, employee.id, w.from) }
+                .onSuccess { _messages.send("Horas de ${employee.name} aprobadas") }
+                .onFailure { _messages.send(it.message ?: "No se ha podido aprobar") }
+        }
+    }
+
     private fun windowFor(p: HoursPeriod, offset: Int, today: LocalDate): PeriodWindow = when (p) {
         HoursPeriod.WEEK -> {
             val monday = Periods.weekStart(today).plusWeeks(offset.toLong())
@@ -201,21 +269,17 @@ class HoursDashboardViewModel @Inject constructor(
                 label = "Semana ${monday.formatShort()} – ${monday.plusDays(6).formatShort()}",
                 fileSuffix = "semana_$monday",
                 month = YearMonth.from(monday),
+                from = monday,
+                to = monday.plusDays(6),
             )
         }
         HoursPeriod.MONTH -> {
             val month = YearMonth.from(today).plusMonths(offset.toLong())
-            PeriodWindow(p, offset, Periods.month(month, zone), month.formatMonthYear(), month.toString(), month)
+            PeriodWindow(
+                p, offset, Periods.month(month, zone), month.formatMonthYear(), month.toString(), month,
+                from = month.atDay(1),
+                to = month.atEndOfMonth(),
+            )
         }
-    }
-
-    /** Semana: horas de contrato. Mes: semanal × díasDelMes / 7. */
-    private fun targetFor(employee: Employee, w: PeriodWindow): Duration {
-        val weeklyMinutes = employee.weeklyContractHours * 60
-        val minutes = when (w.period) {
-            HoursPeriod.WEEK -> weeklyMinutes
-            HoursPeriod.MONTH -> weeklyMinutes * w.month.lengthOfMonth() / 7.0
-        }
-        return Duration.ofMinutes(minutes.toLong())
     }
 }

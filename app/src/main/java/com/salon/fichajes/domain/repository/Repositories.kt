@@ -1,6 +1,9 @@
 package com.salon.fichajes.domain.repository
 
 import com.salon.fichajes.core.time.TimeRange
+import com.salon.fichajes.domain.model.Absence
+import com.salon.fichajes.domain.model.AbsenceType
+import com.salon.fichajes.domain.model.WeekApproval
 import com.salon.fichajes.domain.model.ClockEntry
 import com.salon.fichajes.domain.model.ClockResult
 import com.salon.fichajes.domain.model.Employee
@@ -21,8 +24,14 @@ import java.time.LocalDate
  */
 
 interface ClockRepository {
-    /** Ficha entrada si no hay tramo abierto; si lo hay, ficha salida. */
+    /** Ficha entrada (o vuelta del descanso) si no hay tramo abierto; si lo hay, ficha salida. */
     suspend fun toggle(employeeId: Long): ClockResult
+
+    /** Cierra el tramo en curso para hacer un descanso. */
+    suspend fun startBreak(employeeId: Long): ClockResult
+
+    /** Estaba en el descanso y no vuelve hoy: la salida a descanso pasa a ser el fin de la jornada. */
+    suspend fun finishDayFromBreak(employeeId: Long)
     fun observeRecent(employeeId: Long, limit: Int = 20): Flow<List<ClockEntry>>
     fun observeOverlapping(employeeId: Long, range: TimeRange): Flow<List<ClockEntry>>
     fun observeAllOverlapping(range: TimeRange): Flow<List<ClockEntry>>
@@ -107,8 +116,26 @@ interface VacationRepository {
     fun observeApprovedOverlapping(from: LocalDate, to: LocalDate): Flow<List<VacationRequest>>
     suspend fun request(employeeId: Long, startDate: LocalDate, endDate: LocalDate): Long
 
-    /** Una encargada no puede revisar sus propias vacaciones. */
+    /** Solo la dueña aprueba o rechaza vacaciones. */
     suspend fun review(actorId: Long, requestId: Long, approve: Boolean, comment: String?)
+}
+
+/** Bajas y otras ausencias (las gestionan la dueña y la encargada, nunca la suya propia). */
+interface AbsenceRepository {
+    fun observeOverlapping(from: LocalDate, to: LocalDate): Flow<List<Absence>>
+    suspend fun add(actorId: Long, employeeId: Long, type: AbsenceType, startDate: LocalDate, endDate: LocalDate?, note: String?): Long
+    /** Dar el alta: [lastDay] es el último día de baja. */
+    suspend fun end(actorId: Long, absenceId: Long, lastDay: LocalDate)
+    /** Solo para corregir una baja puesta por error. */
+    suspend fun delete(actorId: Long, absenceId: Long)
+}
+
+/** Aprobación de las horas semanales (dueña o encargada, nunca las suyas). */
+interface WeekApprovalRepository {
+    fun observeForWeek(weekStart: LocalDate): Flow<List<WeekApproval>>
+    fun observeForEmployee(employeeId: Long, limit: Int = 8): Flow<List<WeekApproval>>
+    suspend fun getBetween(from: LocalDate, to: LocalDate): List<WeekApproval>
+    suspend fun approve(actorId: Long, employeeId: Long, weekStart: LocalDate)
 }
 
 interface ScheduleRepository {

@@ -108,4 +108,34 @@ class StaffingTest {
         assertEquals(10, balance.pending)
         assertEquals(16, balance.remaining)
     }
+
+    private fun leave(employeeId: Long, from: String, to: String?) = com.salon.fichajes.domain.model.Absence(
+        id = employeeId, employeeId = employeeId, type = com.salon.fichajes.domain.model.AbsenceType.SICK_LEAVE,
+        startDate = LocalDate.parse(from), endDate = to?.let(LocalDate::parse),
+    )
+
+    @Test
+    fun `las bajas restan personal y no se cuentan dos veces si coinciden con vacaciones`() {
+        val result = staffingByDay(
+            month, staff,
+            approved = listOf(vacation(1, "2026-08-10", "2026-08-12")),
+            absences = listOf(leave(1, "2026-08-11", "2026-08-20"), leave(2, "2026-08-25", null)),
+        )
+        assertEquals(3, result.on(10).available) // solo vacaciones de 1
+        assertEquals(3, result.on(11).available) // 1 de vacaciones y de baja: cuenta una vez
+        assertEquals(1, result.on(11).onLeave)
+        assertEquals(3, result.on(15).available) // 1 de baja
+        assertEquals(3, result.on(31).available) // baja abierta de 2 sigue hasta fin de mes
+        assertEquals(4, result.on(22).available)
+    }
+
+    @Test
+    fun `aviso de minimo tiene en cuenta las bajas`() {
+        val candidate = vacation(3, "2026-08-11", "2026-08-11", status = VacationStatus.PENDING)
+        val below = daysBelowMinimumIfApproved(
+            candidate, staff, approved = emptyList(), minStaff = 3,
+            absences = listOf(leave(1, "2026-08-11", "2026-08-11")),
+        )
+        assertEquals(listOf(11), below.map { it.date.dayOfMonth })
+    }
 }

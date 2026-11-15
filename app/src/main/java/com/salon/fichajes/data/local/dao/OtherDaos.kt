@@ -4,6 +4,8 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
 import androidx.room.Upsert
+import com.salon.fichajes.data.local.entity.AbsenceEntity
+import com.salon.fichajes.data.local.entity.WeekApprovalEntity
 import com.salon.fichajes.data.local.entity.EmployeeEntity
 import com.salon.fichajes.data.local.entity.OwnerCredentialEntity
 import com.salon.fichajes.data.local.entity.ShiftEntity
@@ -52,6 +54,53 @@ interface EmployeeDao {
 
     @Query("UPDATE employees SET pinHash = :pinHash, pinSalt = :pinSalt WHERE id = :id")
     suspend fun updatePin(id: Long, pinHash: String, pinSalt: String)
+}
+
+@Dao
+interface AbsenceDao {
+    @Query(
+        """
+        SELECT * FROM absences
+        WHERE startDate <= :to AND (endDate IS NULL OR endDate >= :from)
+        ORDER BY startDate
+        """
+    )
+    fun observeOverlapping(from: LocalDate, to: LocalDate): Flow<List<AbsenceEntity>>
+
+    @Query("SELECT * FROM absences WHERE id = :id")
+    suspend fun getById(id: Long): AbsenceEntity?
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM absences
+        WHERE employeeId = :employeeId AND startDate <= :to AND (endDate IS NULL OR endDate >= :from)
+        """
+    )
+    suspend fun countOverlapping(employeeId: Long, from: LocalDate, to: LocalDate): Int
+
+    @Insert
+    suspend fun insert(absence: AbsenceEntity): Long
+
+    @Query("UPDATE absences SET endDate = :endDate WHERE id = :id")
+    suspend fun setEndDate(id: Long, endDate: LocalDate)
+
+    @Query("DELETE FROM absences WHERE id = :id")
+    suspend fun delete(id: Long)
+}
+
+@Dao
+interface WeekApprovalDao {
+    @Query("SELECT * FROM week_approvals WHERE weekStart = :weekStart")
+    fun observeForWeek(weekStart: LocalDate): Flow<List<WeekApprovalEntity>>
+
+    @Query("SELECT * FROM week_approvals WHERE employeeId = :employeeId ORDER BY weekStart DESC LIMIT :limit")
+    fun observeForEmployee(employeeId: Long, limit: Int): Flow<List<WeekApprovalEntity>>
+
+    @Query("SELECT * FROM week_approvals WHERE weekStart BETWEEN :from AND :to")
+    suspend fun getBetween(from: LocalDate, to: LocalDate): List<WeekApprovalEntity>
+
+    @Upsert
+    suspend fun upsert(approval: WeekApprovalEntity)
 }
 
 @Dao

@@ -39,6 +39,7 @@ import com.salon.fichajes.domain.model.Employee
 import com.salon.fichajes.domain.model.Role
 import com.salon.fichajes.ui.components.EmployeeAvatar
 import com.salon.fichajes.ui.components.LoadingBox
+import com.salon.fichajes.ui.components.SalonHeader
 
 @Composable
 fun LoginScreen(viewModel: LoginViewModel = hiltViewModel()) {
@@ -62,6 +63,8 @@ fun LoginScreen(viewModel: LoginViewModel = hiltViewModel()) {
 @Composable
 private fun EmployeeGrid(employees: List<Employee>, onSelect: (Employee) -> Unit) {
     Column(Modifier.fillMaxSize().padding(24.dp)) {
+        SalonHeader()
+        Spacer(Modifier.height(24.dp))
         Text("¿Quién eres?", style = MaterialTheme.typography.headlineLarge)
         Text("Toca tu nombre para fichar", style = MaterialTheme.typography.bodyLarge)
         Spacer(Modifier.height(24.dp))
